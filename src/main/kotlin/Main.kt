@@ -10,6 +10,7 @@ import kotlinx.coroutines.withContext
 import kotlinx.coroutines.Dispatchers
 import java.time.LocalDateTime
 import java.time.format.DateTimeFormatter
+import java.time.LocalDate
 
 data class Timeslot(
     val start: LocalDateTime,
@@ -17,32 +18,47 @@ data class Timeslot(
     val room: String
 )
 
+fun currentSemester(): String {
+    val today = LocalDate.now()
+    val month = today.monthValue
+    val year = today.year
+
+    var semester = ""
+
+    if (month >= 3 && month <= 9) {
+        semester = "${year}S"// march-sept summer
+    } else if (month >= 10) {
+        semester = "${year}W" // oct-dec winter (this year)
+    } else {
+        semester = "${year - 1}W" //jan-feb winter (prev year)
+    }
+
+    return semester
+}
+
 
 fun main(args: Array<String>) {
     if(args.isEmpty()){
-        println("No bachelor program id is provided!")
+        println("Usage: provide a program id (and optionally a semester)")
         return
     }
     val programId = args[0]
-    //val course_url = "https://ufind.univie.ac.at/en/course.html?lv=051020&semester=2021S"
-    val bachelor_program_url = "https://ufind.univie.ac.at/en/vvz_sub.html?path=$programId&semester=2021S"
+    val semester = args.getOrElse(1) { currentSemester() }
+    //val course_url = "https://ufind.univie.ac.at/en/course.html?lv=051020&semester=$semester"
+    val bachelor_program_url = "https://ufind.univie.ac.at/en/vvz_sub.html?path=$programId&semester=$semester"
 
     val httpFetcher = OkHttpClient()
-    val request = Request.Builder().url(bachelor_program_url).build()
-
-    val call = httpFetcher.newCall(request)
-    val response = call.execute()
-
-    val html = response.body?.string() ?: ""
-
-//    println("status: ${response.code}")
-//    println("html length: ${html.length}")
-//    println("first 2000 chars")
-//    println(html.take(2000))
-    response.close()
-
-
-
+    val html: String
+    try {
+        val request = Request.Builder().url(bachelor_program_url).build()
+        val call = httpFetcher.newCall(request)
+        val response = call.execute()
+        html = response.body?.string() ?: ""
+        response.close()
+    } catch (e: Exception) {
+        println("Failed to fetch the program page!!")
+        return
+    }
     val document = Jsoup.parse(html)
     val courseLinks = document.select("a.what[href*=course.html]")
 
@@ -72,7 +88,7 @@ fun main(args: Array<String>) {
             //acynv will lauch 60 coroutines but they are handled by A thread(def for runBlocking)
                 withContext(Dispatchers.IO)
                 {
-                    val courseUrl = "https://ufind.univie.ac.at/en/course.html?lv=$id&semester=2021S"
+                    val courseUrl = "https://ufind.univie.ac.at/en/course.html?lv=$id&semester=$semester"
                     try {
                         val request = Request.Builder().url(courseUrl).build()
 
@@ -93,16 +109,17 @@ fun main(args: Array<String>) {
                         for (event in allEvents){
                             val date = event.select(".date").text()// 02.03.
                             val time = event.select(".time").text()// 18:30 - 21:30
-                            val room = event.select(".room").text()
+                            val room = event.select(".room").first()?.text() ?: ""
                             //eventStrings.add(courseName + " | " + date + " | " + time + " | " + room)
                         try {
                             val startTime = time.substringBefore("-").trim()// 18:30
                             val dateTrimmed = date.trim().removeSuffix(".")
 
                             val dateParts = dateTrimmed.split(".")
+                            val semesterYear = semester.take(4)   // "2025W" -> "2025"
                             //"28.06.2021" to ["28", "06", "2021"]
                             val fullDate = if (dateParts.size < 3) {
-                                "$dateTrimmed.2021"   // 2parts, only day,month , add year
+                                "$dateTrimmed.$semesterYear"   // 2parts, only day,month , add year
                             } else {
                                 dateTrimmed
                             }
@@ -143,19 +160,22 @@ fun main(args: Array<String>) {
 
     val futureEvents = mutableListOf<Timeslot>()
     for (event in allEvents) {
-        //if (event.start.isAfter(now)){
-        if (event.start.isAfter(LocalDateTime.of(2020, 1, 1, 0, 0))) {
+        if (event.start.isAfter(now)){
+//        if (event.start.isAfter(LocalDateTime.of(2020, 1, 1, 0, 0))) {
             futureEvents.add(event)
         }
     }
     futureEvents.sortBy { it.start }
+
+    val uniqueEvents = futureEvents.distinctBy { it.start to it.courseName }
+    // val uniqueEvents = futureEvents // for ALL groups sessions
 
     val outputFormatter = DateTimeFormatter.ofPattern("EEE dd.MM.yyyy HH:mm")
 
     println("Next 10 events:")
     println("Date & Time".padEnd(24) + "Course".padEnd(50) + "Room")
     var count = 0
-    for (event in futureEvents) {
+    for (event in uniqueEvents) {
         if (count >= 10) break
         val prettyDate = event.start.format(outputFormatter)
         println(prettyDate.padEnd(24) + event.courseName.padEnd(50) + event.room)
