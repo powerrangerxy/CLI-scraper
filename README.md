@@ -121,9 +121,7 @@ filtering ("after now") and sorting easy.
 - **Multi-room events** show all the room names the site returns, so an event
   booked in several rooms has a long room string. Picking just one main room would
   be an easy improvement.
-- The code could be split into separate `Fetcher` / `Parser` / `Scraper` parts
-  for a bigger project; for now it is kept in one file to keep it simple.
-
+- 
 ## Concurrency
 
 About 60 course pages are read per program. Doing this one after another is slow,
